@@ -12,33 +12,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-# bl_info = { No longer necessary in add-ons for Blender 4.2 and newer
-#     "name": "TTZ Render Exporter",
-#     "author": "Alec Chechik",
-#     "description": "Saves all render passes at once",
-#     "blender": (2, 80, 0),
-#     "version": (0, 0, 1),
-#     # "location": "Properties > Scene > View Layer"
-#     # "warning": "",
-#     # "category": "Generic",
-# }
-
 import bpy
-
-class OBJECT_OT_save_renders(bpy.types.Operator):
-    "Saves renders in a specific file path"
-    bl_idname = "object.save_renders"
-    bl_label = "Save renders"
-    bl_options = {'REGISTER', 'UNDO'} # Allows actions to be undone with Ctrl+Z, may remove if it breaks Blender
-
-    def execute(self, context):
-        """The core payload logic loop."""
-        # 'context' provides access to current user states like active objects or selected vertices
-        self.report({'INFO'}, "Export Initiated Successfully!")
-        return {'FINISHED'} # Instructs Blender that the operation completed with no errors
-
-    # def execute(self, context):
-    #     return super().execute(context)
 
 class PROPERTIES_PT_render_export_panel(bpy.types.Panel):
     bl_label = "Render Exporter"
@@ -47,14 +21,41 @@ class PROPERTIES_PT_render_export_panel(bpy.types.Panel):
     bl_region_type = 'WINDOW'
     bl_context = 'view_layer'
 
+    # UI
     def draw(self, context):
-        layout = self.layout
         scene = context.scene
+        layout = self.layout
         view_layer = context.view_layer
+        
+        layout.use_property_split = False
+        layout.use_property_decorate = False  # No animation.
 
-        col = layout.column(align=True)
-        col.label(text=f"Active Layer: {view_layer.name}")
-        col.operator("object.render_export", text="Export Active Layer")
+        rd = context.scene.render
+        col = layout.column()
+        # image_settings = rd.image_settings
+
+        # 1. Add file name text entry
+        col.use_property_split = True
+        col.use_property_decorate = False
+        col.prop(view_layer, "input_scene_name", text="Scene Name", icon='FONT_DATA')
+
+        # 2. File explorer tab; need to see how to actually use this directory; is it tied to the render tab I copied it from?
+        col.use_property_split = True
+        col.prop(rd, "filepath", text="Save Path")
+  
+        # 2.b (optional) Add passes preset select
+
+        # 3. Add Render and save button
+        col.operator("object.save_renders", icon='RENDER_STILL')
+
+class OBJECT_OT_save_renders(bpy.types.Operator):
+    "Saves renders in a specific file path"
+    bl_idname = "object.save_renders"
+    bl_label = "Render Passes"
+    bl_options = {'REGISTER', 'UNDO'} # Allows actions to be undone with Ctrl+Z, may remove if it breaks Blender
+
+    def execute(self, context):
+        return {'FINISHED'}
 
 classes = (
     OBJECT_OT_save_renders,
@@ -64,6 +65,12 @@ classes = (
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
+    
+    bpy.types.ViewLayer.input_scene_name = bpy.props.StringProperty(
+        name="Scene Name",
+        description="The custom prefix string applied to render files",
+        default="Scene_Name"
+        )
 
 
 def unregister():
