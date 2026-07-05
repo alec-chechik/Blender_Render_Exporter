@@ -13,6 +13,7 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 import bpy
+import os
 
 class PROPERTIES_PT_render_export_panel(bpy.types.Panel):
     bl_label = "Render Exporter"
@@ -61,8 +62,9 @@ class OBJECT_OT_save_renders(bpy.types.Operator):
 
         # Grab the value currently typed into the text box
         prefix = view_layer.input_scene_name
+        saveDirectory = context.scene.render.filepath
 
-        # Safety fallback: If the user left it blank, assign a default string
+        # Safety fallback: If the user left it blank, assign a default string --> Could remove
         if not prefix.strip():
             prefix = "Render"
             
@@ -72,7 +74,7 @@ class OBJECT_OT_save_renders(bpy.types.Operator):
         node_tree = context.scene.compositing_node_group
         if not node_tree:
             self.report({'INFO'}, "No compositor active. Creating a new node group...")
-            # Create a completely fresh tree if the user hasn't turned on compositing yet
+            # Create a fresh tree if the user hasn't turned on compositing yet
             node_tree = bpy.data.node_groups.new("Addon_Compositor", "CompositorNodeTree")
             scene.compositing_node_group = node_tree
             
@@ -89,22 +91,27 @@ class OBJECT_OT_save_renders(bpy.types.Operator):
             self.report({'INFO'}, "Creating a new File Output Node...")
             # Instantly spawn the node via the layout tracking engine
             output_node = nodes.new(type="CompositorNodeOutputFile")
-            # Shift its location coordinates so it doesn't stack awkwardly at (0,0)
             output_node.location = (400, 200) #Might need to change size, it's quite small RN
+
+            render_layers = node_tree.nodes.new(type='CompositorNodeRLayers')
+            render_layers.location = (0, 200)
             
         # 4. Set the global destination folder directory for this node
-        output_node.directory = "C:\\RenderOutput\\" # You can change this to a dynamic path
+        output_node.directory = saveDirectory
+        output_node.file_name = prefix
 
+        # this part is problematic, rewrite
+        # is creating blank files apparently
         # 5. Apply the custom prefix string variable to the modern file items
         # Clear out any dummy default file items if it's a brand new node
-        if len(output_node.file_output_items) == 1 and output_node.file_output_items[0].name == "Image":
-            output_node.file_output_items.new('RGBA', f"{prefix}_Combined")
-        else:
-            # If the user already had multi-pass slots configured, batch update them
-            for item in output_node.file_output_items:
-                # Ensure we don't infinitely stack prefixes if they click multiple times
-                if not item.name.startswith(prefix):
-                    item.name = f"{prefix}_{item.name}"
+        # if len(output_node.file_output_items) == 1 and output_node.file_output_items[0].name == "Image":
+        #     output_node.file_output_items.new('RGBA', f"{prefix}_Combined")
+        # else:
+        #     # If the user already had multi-pass slots configured, batch update them
+        #     for item in output_node.file_output_items:
+        #         # Ensure we don't infinitely stack prefixes if they click multiple times
+        #         if not item.name.startswith(prefix):
+        #             item.name = f"{prefix}_{item.name}"
 
         # 6. (Optional Workflow) Automatically connect Render Layers node to your new output node
         rlayers_node = None
@@ -118,6 +125,15 @@ class OBJECT_OT_save_renders(bpy.types.Operator):
             node_tree.links.new(rlayers_node.outputs['Image'], output_node.inputs[0])
 
         self.report({'INFO'}, f"Configured File Output node with prefix: '{prefix}'")
+        
+        # Ensures render uses the compositing tree
+        context.scene.render.use_compositing = True
+        
+        # 2. Trigger the render and force it to save to the disk paths
+        # 'INVOKE_DEFAULT' opens the render window smoothly without freezing the UI
+        bpy.ops.render.render('INVOKE_DEFAULT', write_still=True)
+
+        self.report({'INFO'}, f"Rendering and saving to: {saveDirectory}")
         return {'FINISHED'}
 
 classes = (
