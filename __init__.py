@@ -15,6 +15,56 @@
 import bpy
 import os # used for manipulating file directory data.
 
+# Function that toggles selected render passes based on a dropdown selection.
+def select_export_preset(self, context):
+    view_layer = context.view_layer
+    preset = self.pass_preset_mode
+
+    # Turn off all passes in the list.
+    for attr in dir(view_layer):
+        if attr.startswith('use_pass_'):
+            setattr(view_layer, attr, False)
+
+    # Create list to store selected passes.
+    passes_to_enable = []
+
+    # Use match statement to define selected preset.
+    match preset:
+        case 'combined_only':
+            passes_to_enable = [
+                'use_pass_diffuse_combined'
+            ]
+        case 'all_passes':
+            passes_to_enable = [
+                'use_pass_diffuse_color', 
+                'use_pass_diffuse_direct', 
+                'use_pass_glossy_direct', 
+                'use_pass_emit', 
+                'use_pass_normal'
+            ]
+        case 'static_sprite':
+            passes_to_enable = [
+                'use_pass_diffuse_color', 
+                'use_pass_diffuse_direct', 
+                'use_pass_glossy_direct'
+            ]
+        case 'dynamic_sprite':
+            passes_to_enable = [
+                'use_pass_diffuse_color', 
+                'use_pass_diffuse_direct', 
+                'use_pass_glossy_direct', 
+                'use_pass_normal'
+            ]
+        case 'lighting_only':
+            passes_to_enable = [
+                'use_pass_diffuse_direct', 
+                'use_pass_glossy_direct'
+            ]
+
+    # Turn on passes in the list.
+    for attr in passes_to_enable:
+        setattr(view_layer, attr, True)
+
 # UI panel
 class PROPERTIES_PT_render_export_panel(bpy.types.Panel):
     bl_label = "Render Exporter"
@@ -23,32 +73,38 @@ class PROPERTIES_PT_render_export_panel(bpy.types.Panel):
     bl_region_type = 'WINDOW'
     bl_context = 'view_layer'
 
-    # Visual UI elements.
+    # Draw visual UI elements.
     def draw(self, context): # context provides access to current user states like active scene, objects, or selected vertices.
         layout = self.layout
         view_layer = context.view_layer # Accesses view_layer properties panel.
         
         layout.use_property_split = False
-        layout.use_property_decorate = False  # Disables animating layout parameters.
+        layout.use_property_decorate = False
 
         rd = context.scene.render # Accesses render as a variable.
         col = layout.column()
 
-        # UI 1. Add file name text entry.
+        # UI 1. File explorer tab to set save directory.
+        col.prop(rd, "filepath", text="")
+
+        # UI 2. File name text entry.
         col.use_property_split = True
         col.use_property_decorate = False
         col.prop(view_layer, "input_scene_name", text="Scene Name")
 
-        # UI 2. File explorer tab to set save directory.
-        col.use_property_split = True
-        col.prop(rd, "filepath", text="Save Path")
+        # UI 3. Passes preset dropdown.
+        col.prop(view_layer, "pass_preset_mode", text="Export Pass Preset")
+        col.separator(factor=2)
   
-        # UI 2.b Passes preset selection. (optional, may be added in the future) 
-
-        # UI 3. Render and save button.
+        # UI 4. Render and save button.
         col.operator("object.save_renders", icon='RENDER_STILL')
+    
+# Add "Render Passes" button to render options in the top bar.
+def draw_custom_render_menu(self, context):
+    layout = self.layout
+    layout.operator("object.save_renders", text="Render Passes", icon='RENDER_STILL') # TBD: Could add a custom icon for differentiation.
 
-# Main operator that renders scene with selected passes and saves them all at once with appropriate names & formatting.
+# Operator that renders scene with selected passes and saves them all at once with appropriate names & formatting.
 class OBJECT_OT_save_renders(bpy.types.Operator):
     "Saves renders in a specific file path"
     bl_idname = "object.save_renders"
@@ -65,7 +121,7 @@ class OBJECT_OT_save_renders(bpy.types.Operator):
             
         self.report({'INFO'}, f"Using prefix variable: '{prefix}'")
 
-        # Access the Compositor, which will be used to configure renders and their file paths.
+        # Access the Compositor, which will be the main method of configuring renders and their file paths.
         node_tree = context.scene.compositing_node_group
 
         # Create a new node tree if there is no existing one.
@@ -103,7 +159,7 @@ class OBJECT_OT_save_renders(bpy.types.Operator):
         output_node.file_output_items.clear()
 
         # Configure compositor by using a table of possible layer passes with their appropriate save settings.
-        # Format: ('ViewLayer Attribute', 'Output Node Socket Type', 'Bit Depth', 'Output Node Label', 'File Save Suffix', 'Needs Alpha').
+        # Format: (ViewLayer Attribute, Output Node Socket Type, Bit Depth, Output Node Label, File Save Suffix, Needs Alpha).
         pass_settings = [
             ('use_pass_combined', 'RGBA', '8', 'Combined', 'Image', True),
             ('use_pass_normal', 'RGBA', '16', 'Normal', 'Normal', False),   
@@ -114,19 +170,19 @@ class OBJECT_OT_save_renders(bpy.types.Operator):
             ('use_pass_emit', 'FLOAT', '16', 'Emissive', 'Emission', False),
         ]
         
-        # Loop through the table
+        # Loop through the table.
         current_slot = 0
         for attr, socket_type, bit_depth, out_name, socket_name, needs_alpha in pass_settings:
             
             # Check what render passes from the list are selected; If it isn't found, returns False. 
             if getattr(view_layer, attr, False): # This false isn't attr = False, but a safety fallback in case the attribute isn't found.
                 
-                # Create the slot and save it to a variable.
+                # Create the node slot and save it to "item".
                 item = output_node.file_output_items.new(socket_type, out_name)
                 item.override_node_format = True # Allows each pass to have its render settings by overriding the node settings.
                 item.format.color_depth = bit_depth
                 
-                if needs_alpha:
+                if needs_alpha: #TODO: Possible cleanup - Clear alpha slots when changing presets/if it isn't toggled on
                     unique_node_name = f"Alpha_{out_name}"
                     # Look for alpha node with exact same name in case it doesn't need to be created.
                     alpha_node = nodes.get(unique_node_name)
@@ -135,7 +191,7 @@ class OBJECT_OT_save_renders(bpy.types.Operator):
                         alpha_node = nodes.new(type="CompositorNodeSetAlpha")
                         alpha_node.name = unique_node_name
                         alpha_node.label = unique_node_name # Name and label the node to ensure there isn't one already for that particular render pass.
-                        alpha_node.location = (300, 250 - (current_slot * 100))
+                        alpha_node.location = (300, 250 - (current_slot * 70)) # Offset alpha node position based on item socket location.
 
                     # Create node connections.
                     node_tree.links.new(render_layers.outputs[socket_name], alpha_node.inputs['Image'])
@@ -169,14 +225,43 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
     
+    bpy.types.TOPBAR_MT_render.prepend(draw_custom_render_menu)
+
     # Scene Name variable, description appears if you hover over its entry box.
     bpy.types.ViewLayer.input_scene_name = bpy.props.StringProperty(
         name="Scene Name",
         description="The prefix applied to render files. Will be followed by an underscore and the selected render pass.",
         default="Scene_Name"
         )
+    
+    # Define the dropdown items labels and description.
+    preset_items = [
+        ('combined_only', "Blender Default", "Combined pass only."),
+        ('all_passes', "All Sprite Passes", "Albedo, lighting, normal, and emissive maps"),
+        ('static_sprite', "Static Sprite", "No dynamic lighting; Albedo and lighting passes"),
+        ('dynamic_sprite', "Dynamic Sprite", "Supports dynamic lighting; Albedo, lighting, and normal maps"),
+        ('lighting_only', "Lighting Only", "Lighting passes only")
+    ]
+
+    # Register the EnumProperty and attach the update function to it.
+    bpy.types.ViewLayer.pass_preset_mode = bpy.props.EnumProperty(
+        name="Pass Presets",
+        description="Select predefined render passes",
+        items=preset_items,
+        # default='combined_only',
+        update=select_export_preset
+    )
 
 # Unregister classes upon disabling add-on.
 def unregister():
     for cls in classes:
         bpy.utils.unregister_class(cls)
+
+    # Delete "Render Passes" button in the render dropdown.
+    bpy.types.TOPBAR_MT_render.remove(draw_custom_render_menu)
+
+    # Delete variables.
+    del bpy.types.ViewLayer.pass_preset_mode
+    del bpy.types.ViewLayer.input_scene_name
+
+    
