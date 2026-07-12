@@ -32,7 +32,7 @@ def select_export_preset(self, context):
     match preset:
         case 'combined_only':
             passes_to_enable = [
-                'use_pass_diffuse_combined'
+                'use_pass_combined'
             ]
         case 'all_passes':
             passes_to_enable = [
